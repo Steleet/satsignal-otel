@@ -13,7 +13,9 @@ Two anchor shapes:
   proof is recoverable from the bundle.
 
 Both shapes accept ``session_id`` as an off-chain correlation field
-(we pack the OTel ``trace_id:span_id`` into it). ``label`` is
+(we pack the OTel ``trace_id-span_id`` into it — `-` join, not `:`,
+because the server's SESSION_ID_CHARSET is ``[A-Za-z0-9_.-]``; the
+v0.1.0 colon variant was rejected and was fixed in v0.1.1). ``label`` is
 attacker-controllable display text — the server enforces length caps
 and rejects LLM-harness control substrings.
 """

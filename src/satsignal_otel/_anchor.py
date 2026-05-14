@@ -135,7 +135,7 @@ class SatsignalApi:
         api_key: str,
         timeout: float = 30.0,
         transport: Optional[TransportFn] = None,
-        user_agent: str = "satsignal-otel/0.1.0",
+        user_agent: str = "satsignal-otel/0.1.1",
     ):
         self.api_base = api_base.rstrip("/")
         self.api_key = api_key

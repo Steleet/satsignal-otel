@@ -167,9 +167,14 @@ def canonical_fields() -> tuple[str, ...]:
 
 
 def trace_span_session_id(span) -> str | None:
-    """Build ``trace_id:span_id`` off-chain session_id from a span's
+    """Build ``trace_id-span_id`` off-chain session_id from a span's
     SpanContext. Returns None if neither id is available. Both ids
     are rendered as their canonical hex (32-char trace, 16-char span).
+
+    The ``-`` separator is required: the Satsignal server's
+    ``session_id`` charset is ``[A-Za-z0-9_.-]`` (see
+    notary.customer.db.SESSION_ID_CHARSET). The colon used in
+    OpenTelemetry's wire conventions is rejected with a 400.
     """
     ctx = getattr(span, "context", None) or getattr(span, "get_span_context",
                                                      lambda: None)()
@@ -184,4 +189,4 @@ def trace_span_session_id(span) -> str | None:
         parts.append(_hex(trace_id, 32))
     if span_id:
         parts.append(_hex(span_id, 16))
-    return ":".join(parts)
+    return "-".join(parts)

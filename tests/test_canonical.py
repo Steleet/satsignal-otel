@@ -119,8 +119,10 @@ def test_canonicalize_output_matches_known_sha():
 def test_session_id_packs_trace_and_span():
     span = _FakeSpan(trace_id=0x1, span_id=0x2)
     sid = trace_span_session_id(span)
-    # trace_id is 32-hex, span_id is 16-hex.
-    assert sid == "00000000000000000000000000000001:0000000000000002"
+    # trace_id is 32-hex, span_id is 16-hex; joined with `-` because
+    # the Satsignal server rejects `:` in session_id (charset is
+    # [A-Za-z0-9_.-]). See trace_span_session_id docstring.
+    assert sid == "00000000000000000000000000000001-0000000000000002"
 
 
 def test_canonicalize_rejects_nan():

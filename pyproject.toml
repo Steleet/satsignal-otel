@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "satsignal-otel"
+version = "0.1.0"
+description = "OpenTelemetry SpanProcessor that anchors selected GenAI spans to BSV via Satsignal."
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "Satsignal" }]
+license = { text = "MIT" }
+keywords = ["satsignal", "opentelemetry", "otel", "gen-ai", "evals", "bsv", "audit", "ai-agents"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.urls]
+Homepage      = "https://satsignal.cloud"
+Documentation = "https://satsignal.cloud/docs.html#otel"
+Source        = "https://github.com/Steleet/satsignal-otel"
+Issues        = "https://github.com/Steleet/satsignal-otel/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]

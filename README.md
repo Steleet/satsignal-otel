@@ -76,10 +76,21 @@ with tracer.start_as_current_span("release.gate") as span:
 
 ## Configuration
 
+> **Vocabulary:** `folder_slug` is the preferred public name;
+> `matter_slug` is a frozen legacy alias and keeps working forever.
+> The constructor accepts either; **at least one** is required (legacy
+> callers that pass `matter_slug=` are unaffected). If both are set to
+> *different* values the constructor raises. The HTTP request to the
+> Satsignal API still sends the frozen `matter_slug` key, so older /
+> self-hosted servers keep working unchanged. `.folder_slug` /
+> `.matter_slug` read accessors and `AnchorResult.folder_slug` /
+> `.proof_url` / `.proof_id` aliases are available.
+
 ```python
 SatsignalSpanProcessor(
     api_key,                    # required: SATSIGNAL_API_KEY
-    matter_slug,                # required: workspace matter for receipts
+    folder_slug,                # preferred: workspace folder for proofs
+    # matter_slug,              # frozen legacy alias of folder_slug
     base_url="https://app.satsignal.cloud",
     flush_interval=60.0,        # seconds between manifest flushes
     max_batch_size=500,         # force-flush when queue hits this size

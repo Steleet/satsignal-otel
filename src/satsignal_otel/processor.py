@@ -9,7 +9,7 @@ Drop into your ``TracerProvider``::
     provider.add_span_processor(
         SatsignalSpanProcessor(
             api_key=os.environ["SATSIGNAL_API_KEY"],
-            matter_slug="otel-evals",
+            folder_slug="otel-evals",   # legacy alias: matter_slug=
         ),
     )
 
@@ -69,9 +69,14 @@ class SatsignalSpanProcessor(SpanProcessor):
     ----------
     api_key
         Bearer key from your Satsignal workspace. Required.
+    folder_slug
+        Workspace folder the proofs file under (e.g. ``"otel-evals"``).
+        Either ``folder_slug`` or the legacy ``matter_slug`` is
+        required (both are accepted; if both are set to *different*
+        values the constructor raises).
     matter_slug
-        Workspace matter the receipts file under (e.g. ``"otel-evals"``).
-        Required.
+        Frozen legacy alias of ``folder_slug`` — still supported
+        forever.
     base_url
         Override the Satsignal API host. Defaults to the production
         host. Note: ``app.satsignal.cloud`` is the customer-API host;
@@ -104,7 +109,8 @@ class SatsignalSpanProcessor(SpanProcessor):
         self,
         *,
         api_key: str,
-        matter_slug: str,
+        matter_slug: Optional[str] = None,
+        folder_slug: Optional[str] = None,
         base_url: str = _anchor.DEFAULT_API_BASE,
         flush_interval: float = 60.0,
         max_batch_size: int = 500,
@@ -114,8 +120,20 @@ class SatsignalSpanProcessor(SpanProcessor):
     ):
         if not api_key:
             raise ValueError("api_key is required")
-        if not matter_slug:
-            raise ValueError("matter_slug is required")
+        # ``folder_slug`` is the new public kwarg, ``matter_slug`` the
+        # frozen legacy one. Existing callers passing only
+        # ``matter_slug=`` are unaffected. Conflict (both set,
+        # different) -> raise loudly; require at least one (legacy
+        # callers always passed matter_slug, so none breaks).
+        _slug = _anchor.resolve_folder_alias(
+            folder_slug, matter_slug,
+            source="SatsignalSpanProcessor folder_slug/matter_slug",
+        )
+        if not _slug:
+            raise ValueError(
+                "folder_slug is required "
+                "(or the legacy alias matter_slug)"
+            )
         if flush_interval <= 0:
             raise ValueError("flush_interval must be > 0")
         if max_batch_size <= 0:
@@ -124,7 +142,10 @@ class SatsignalSpanProcessor(SpanProcessor):
         self._api = SatsignalApi(
             api_base=base_url, api_key=api_key, transport=transport,
         )
-        self._matter_slug = matter_slug
+        # Stored under the legacy attr name so existing subclasses /
+        # introspection that read ``_matter_slug`` keep working; this
+        # is the resolved value regardless of which kwarg supplied it.
+        self._matter_slug = _slug
         self._flush_interval = float(flush_interval)
         self._max_batch_size = int(max_batch_size)
         self._daily_anchor_cap = int(daily_anchor_cap)
@@ -146,6 +167,18 @@ class SatsignalSpanProcessor(SpanProcessor):
             daemon=True,
         )
         self._worker.start()
+
+    # ---- public read accessors ---------------------------------------
+
+    @property
+    def folder_slug(self) -> str:
+        """New public alias for the resolved folder/matter slug."""
+        return self._matter_slug
+
+    @property
+    def matter_slug(self) -> str:
+        """Legacy alias of :pyattr:`folder_slug` (still supported)."""
+        return self._matter_slug
 
     # ---- SpanProcessor contract --------------------------------------
 

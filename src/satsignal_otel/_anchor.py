@@ -31,6 +31,35 @@ from typing import Any, Callable, Optional
 
 DEFAULT_API_BASE = "https://app.satsignal.cloud"
 
+
+def resolve_folder_alias(
+    folder: Optional[str],
+    matter: Optional[str],
+    *,
+    source: str = "folder/matter",
+) -> Optional[str]:
+    """Reconcile the new public ``folder`` surface with the frozen
+    legacy ``matter`` surface (matches the Satsignal server rule).
+
+    * neither set      -> ``None``
+    * only one set     -> use it
+    * both set, equal  -> accept
+    * both set, differ -> raise ``ValueError`` loudly; never silent-pick
+
+    Precedence when equal / single: the new ``folder`` value is
+    preferred, ``matter`` is the fallback. Empty / ``None`` count as
+    "not set".
+    """
+    f = folder if folder else None
+    m = matter if matter else None
+    if f is not None and m is not None and f != m:
+        raise ValueError(
+            f"folder and matter are aliases and must not be set to "
+            f"different values; use folder ({source}: "
+            f"folder={f!r}, matter={m!r})"
+        )
+    return f if f is not None else m
+
 # Mirrors notary/manifest.MAX_LEAVES. A request with > 10000 items
 # 400s server-side, so the SpanProcessor chunks before reaching here.
 MAX_MANIFEST_LEAVES = 10000
@@ -72,6 +101,21 @@ class AnchorResult:
     root: Optional[str] = None
     session_id: Optional[str] = None
     raw: dict = field(default_factory=dict)
+
+    # New public aliases mirror the legacy fields 1:1 so existing code
+    # reading ``.matter_slug`` / ``.receipt_url`` / ``.bundle_id`` keeps
+    # working byte-identically; new code may prefer the new names.
+    @property
+    def folder_slug(self) -> str:
+        return self.matter_slug
+
+    @property
+    def proof_url(self) -> str:
+        return self.receipt_url
+
+    @property
+    def proof_id(self) -> str:
+        return self.bundle_id
 
 
 # Transport hook signature:
@@ -137,7 +181,7 @@ class SatsignalApi:
         api_key: str,
         timeout: float = 30.0,
         transport: Optional[TransportFn] = None,
-        user_agent: str = "satsignal-otel/0.1.1",
+        user_agent: str = "satsignal-otel/0.2.0",
     ):
         self.api_base = api_base.rstrip("/")
         self.api_key = api_key
@@ -150,15 +194,26 @@ class SatsignalApi:
     def anchor_standard(
         self,
         *,
-        matter_slug: str,
+        matter_slug: Optional[str] = None,
+        folder_slug: Optional[str] = None,
         sha256_hex: str,
         file_size: Optional[int] = None,
         label: Optional[str] = None,
         session_id: Optional[str] = None,
         force_new: bool = False,
     ) -> AnchorResult:
+        # ``folder_slug`` is the new public kwarg, ``matter_slug`` the
+        # frozen legacy one. Existing callers passing only
+        # ``matter_slug=`` are unaffected. Conflict -> raise loudly.
+        slug = resolve_folder_alias(
+            folder_slug, matter_slug,
+            source="anchor_standard folder_slug/matter_slug",
+        )
+        # WIRE-TOKEN POLICY: the request body MUST still send the frozen
+        # legacy key ``matter_slug`` so every Satsignal server (incl.
+        # older / self-hosted) keeps accepting it.
         body: dict[str, Any] = {
-            "matter_slug": matter_slug,
+            "matter_slug": slug,
             "sha256_hex": sha256_hex.lower().strip(),
         }
         if file_size is not None:
@@ -171,17 +226,22 @@ class SatsignalApi:
         if force_new:
             body["force_new"] = True
         return self._post_anchor(body, default_mode="standard",
-                                  matter_slug=matter_slug,
+                                  matter_slug=slug,
                                   session_id=session_id)
 
     def anchor_manifest(
         self,
         *,
-        matter_slug: str,
+        matter_slug: Optional[str] = None,
+        folder_slug: Optional[str] = None,
         items: list,             # [{label, sha256_hex}, ...]
         label: Optional[str] = None,
         session_id: Optional[str] = None,
     ) -> AnchorResult:
+        slug = resolve_folder_alias(
+            folder_slug, matter_slug,
+            source="anchor_manifest folder_slug/matter_slug",
+        )
         if not items:
             raise APIError(
                 400, "empty_items",
@@ -203,8 +263,9 @@ class SatsignalApi:
                 )
             leaf_label = _safe_label(it.get("label")) or ""
             clean.append({"label": leaf_label, "sha256_hex": sha})
+        # WIRE-TOKEN POLICY: frozen legacy key on the wire.
         body: dict[str, Any] = {
-            "matter_slug": matter_slug,
+            "matter_slug": slug,
             "items": clean,
         }
         label = _safe_label(label)
@@ -213,7 +274,7 @@ class SatsignalApi:
         if session_id:
             body["session_id"] = session_id
         return self._post_anchor(body, default_mode="manifest",
-                                  matter_slug=matter_slug,
+                                  matter_slug=slug,
                                   session_id=session_id)
 
     # ---- internals ----------------------------------------------------
@@ -244,12 +305,19 @@ class SatsignalApi:
         except (ValueError, UnicodeDecodeError) as e:
             raise APIError(status, "bad_response",
                            f"non-JSON 2xx body: {e}")
+        # READING responses: prefer the new key if the server emits it,
+        # else fall back to the legacy key (servers today send legacy).
         return AnchorResult(
-            bundle_id=str(data.get("bundle_id") or ""),
+            bundle_id=str(data.get("proof_id") or data.get("bundle_id") or ""),
             txid=data.get("txid"),
             mode=str(data.get("mode") or default_mode),
-            matter_slug=str(data.get("matter_slug") or matter_slug),
-            receipt_url=str(data.get("receipt_url") or ""),
+            matter_slug=str(
+                data.get("folder_slug") or data.get("matter_slug")
+                or matter_slug
+            ),
+            receipt_url=str(
+                data.get("proof_url") or data.get("receipt_url") or ""
+            ),
             bundle_url=data.get("bundle_url"),
             duplicate=bool(data.get("duplicate", False)),
             leaf_count=data.get("leaf_count"),

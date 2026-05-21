@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Release infrastructure: PyPI publishes via Trusted Publishers (OIDC) — workflow file is `.github/workflows/publish.yml`, no API tokens. Replaces a prior workflow that set `password: secrets.PYPI_API_TOKEN` alongside `id-token: write`, which silently disabled OIDC (that path never published). Mirrors the `satsignal-mcp` 0.4.1 pilot; see `RELEASE.md` in `Steleet/satsignal-mcp` and the public "How we publish" section at <https://satsignal.cloud/docs.html#how-we-publish>.
+
 ## 0.2.0
 
 Additive proof/folder vocabulary aliases — fully backward-compatible.

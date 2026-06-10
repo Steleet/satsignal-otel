@@ -38,7 +38,7 @@ def resolve_folder_alias(
     *,
     source: str = "folder/matter",
 ) -> Optional[str]:
-    """Reconcile the new public ``folder`` surface with the frozen
+    """Reconcile the canonical ``folder`` surface with the deprecated
     legacy ``matter`` surface (matches the Satsignal server rule).
 
     * neither set      -> ``None``
@@ -46,7 +46,7 @@ def resolve_folder_alias(
     * both set, equal  -> accept
     * both set, differ -> raise ``ValueError`` loudly; never silent-pick
 
-    Precedence when equal / single: the new ``folder`` value is
+    Precedence when equal / single: the canonical ``folder`` value is
     preferred, ``matter`` is the fallback. Empty / ``None`` count as
     "not set".
     """
@@ -102,9 +102,10 @@ class AnchorResult:
     session_id: Optional[str] = None
     raw: dict = field(default_factory=dict)
 
-    # New public aliases mirror the legacy fields 1:1 so existing code
-    # reading ``.matter_slug`` / ``.receipt_url`` / ``.bundle_id`` keeps
-    # working byte-identically; new code may prefer the new names.
+    # Canonical accessors (the documented names). The dataclass fields
+    # keep their legacy names so existing code constructing or reading
+    # ``.matter_slug`` / ``.receipt_url`` / ``.bundle_id`` keeps working
+    # byte-identically; new code should read the canonical properties.
     @property
     def folder_slug(self) -> str:
         return self.matter_slug
@@ -181,7 +182,7 @@ class SatsignalApi:
         api_key: str,
         timeout: float = 30.0,
         transport: Optional[TransportFn] = None,
-        user_agent: str = "satsignal-otel/0.2.0",
+        user_agent: str = "satsignal-otel/0.3.0",
     ):
         self.api_base = api_base.rstrip("/")
         self.api_key = api_key
@@ -194,26 +195,27 @@ class SatsignalApi:
     def anchor_standard(
         self,
         *,
-        matter_slug: Optional[str] = None,
         folder_slug: Optional[str] = None,
+        matter_slug: Optional[str] = None,
         sha256_hex: str,
         file_size: Optional[int] = None,
         label: Optional[str] = None,
         session_id: Optional[str] = None,
         force_new: bool = False,
     ) -> AnchorResult:
-        # ``folder_slug`` is the new public kwarg, ``matter_slug`` the
-        # frozen legacy one. Existing callers passing only
+        # ``folder_slug`` is the canonical kwarg, ``matter_slug`` the
+        # deprecated legacy alias. Existing callers passing only
         # ``matter_slug=`` are unaffected. Conflict -> raise loudly.
         slug = resolve_folder_alias(
             folder_slug, matter_slug,
             source="anchor_standard folder_slug/matter_slug",
         )
-        # WIRE-TOKEN POLICY: the request body MUST still send the frozen
-        # legacy key ``matter_slug`` so every Satsignal server (incl.
-        # older / self-hosted) keeps accepting it.
+        # WIRE-TOKEN POLICY (vocabulary sunset, decision 0046): the
+        # request body sends the canonical ``folder_slug`` key. The
+        # hosted Satsignal API accepts legacy ``matter_slug`` only as a
+        # silent request alias; canonical is what tooling must send.
         body: dict[str, Any] = {
-            "matter_slug": slug,
+            "folder_slug": slug,
             "sha256_hex": sha256_hex.lower().strip(),
         }
         if file_size is not None:
@@ -226,14 +228,14 @@ class SatsignalApi:
         if force_new:
             body["force_new"] = True
         return self._post_anchor(body, default_mode="standard",
-                                  matter_slug=slug,
+                                  folder_slug=slug,
                                   session_id=session_id)
 
     def anchor_manifest(
         self,
         *,
-        matter_slug: Optional[str] = None,
         folder_slug: Optional[str] = None,
+        matter_slug: Optional[str] = None,
         items: list,             # [{label, sha256_hex}, ...]
         label: Optional[str] = None,
         session_id: Optional[str] = None,
@@ -263,9 +265,9 @@ class SatsignalApi:
                 )
             leaf_label = _safe_label(it.get("label")) or ""
             clean.append({"label": leaf_label, "sha256_hex": sha})
-        # WIRE-TOKEN POLICY: frozen legacy key on the wire.
+        # WIRE-TOKEN POLICY (decision 0046): canonical key on the wire.
         body: dict[str, Any] = {
-            "matter_slug": slug,
+            "folder_slug": slug,
             "items": clean,
         }
         label = _safe_label(label)
@@ -274,7 +276,7 @@ class SatsignalApi:
         if session_id:
             body["session_id"] = session_id
         return self._post_anchor(body, default_mode="manifest",
-                                  matter_slug=slug,
+                                  folder_slug=slug,
                                   session_id=session_id)
 
     # ---- internals ----------------------------------------------------
@@ -284,7 +286,7 @@ class SatsignalApi:
         body: dict,
         *,
         default_mode: str,
-        matter_slug: str,
+        folder_slug: str,
         session_id: Optional[str],
     ) -> AnchorResult:
         url = f"{self.api_base}/api/v1/anchors"
@@ -305,15 +307,17 @@ class SatsignalApi:
         except (ValueError, UnicodeDecodeError) as e:
             raise APIError(status, "bad_response",
                            f"non-JSON 2xx body: {e}")
-        # READING responses: prefer the new key if the server emits it,
-        # else fall back to the legacy key (servers today send legacy).
+        # READING responses: the hosted API emits canonical keys ONLY
+        # (``proof_id`` / ``proof_url`` / ``folder_slug``) since the
+        # vocabulary sunset (decision 0046). The legacy-key fallbacks
+        # below are kept solely for older self-hosted servers.
         return AnchorResult(
             bundle_id=str(data.get("proof_id") or data.get("bundle_id") or ""),
             txid=data.get("txid"),
             mode=str(data.get("mode") or default_mode),
             matter_slug=str(
                 data.get("folder_slug") or data.get("matter_slug")
-                or matter_slug
+                or folder_slug
             ),
             receipt_url=str(
                 data.get("proof_url") or data.get("receipt_url") or ""

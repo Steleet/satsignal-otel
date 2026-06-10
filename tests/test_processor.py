@@ -73,12 +73,13 @@ class MockTransport:
     def __init__(self, *, status: int = 200, body: dict | None = None):
         self.calls: List[Tuple[str, str, dict, bytes]] = []
         self.status = status
+        # Canonical-keys-only — matches the live server's 2xx shape.
         self.body = body if body is not None else {
-            "bundle_id": "b" * 16,
+            "proof_id": "b" * 16,
             "txid": "deadbeef",
             "mode": "manifest",
-            "matter_slug": "otel-evals",
-            "receipt_url": "https://app.satsignal.cloud/r/x",
+            "folder_slug": "otel-evals",
+            "proof_url": "https://app.satsignal.cloud/r/x",
             "bundle_url": "https://app.satsignal.cloud/bundle/x.mbnt",
             "duplicate": False,
         }
@@ -91,9 +92,11 @@ class MockTransport:
 # ---- tests -----------------------------------------------------------
 
 def _new_processor(transport, **kwargs):
+    # Canonical kwarg; the deprecated matter_slug= ctor path is covered
+    # in test_folder_alias.py.
     return SatsignalSpanProcessor(
         api_key="sk_test",
-        matter_slug="otel-evals",
+        folder_slug="otel-evals",
         flush_interval=kwargs.pop("flush_interval", 0.2),
         max_batch_size=kwargs.pop("max_batch_size", 100),
         transport=transport,
@@ -125,7 +128,8 @@ def test_marked_span_anchors_as_manifest_batch():
         _method, url, _headers, body = t.calls[0]
         assert url.endswith("/api/v1/anchors")
         decoded = json.loads(body.decode("utf-8"))
-        assert decoded["matter_slug"] == "otel-evals"
+        assert decoded["folder_slug"] == "otel-evals"   # canonical wire key
+        assert "matter_slug" not in decoded
         assert "items" in decoded   # manifest mode
         assert len(decoded["items"]) == 1
         assert decoded["items"][0]["sha256_hex"]

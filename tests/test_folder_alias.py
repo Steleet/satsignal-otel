@@ -1,12 +1,15 @@
-"""Additive folder/proof vocabulary alias — compat + conflict tests.
+"""Folder/proof vocabulary — compat + conflict tests.
 
-Per coordinator policy:
-  * legacy ``matter_slug=`` (ctor + api) keeps working byte-identically
-  * the new ``folder_slug=`` surface works
-  * ctor ``matter_slug`` is no longer hard-required: EITHER
-    ``folder_slug`` OR ``matter_slug`` satisfies it (raise if NEITHER)
+Per the vocabulary sunset (decision 0046):
+  * legacy ``matter_slug=`` (ctor + api) keeps working as a silent alias
+  * the canonical ``folder_slug=`` surface is primary
+  * ctor: EITHER ``folder_slug`` OR ``matter_slug`` satisfies the
+    requirement (raise if NEITHER)
   * conflict rule: both supplied, different non-empty -> ValueError
-  * WIRE-TOKEN POLICY: the HTTP body still sends ``matter_slug``
+  * WIRE-TOKEN POLICY: the HTTP body sends the canonical
+    ``folder_slug`` (the legacy ``matter_slug`` key is never sent)
+  * responses: the live server emits canonical keys ONLY; legacy-key
+    fallback is retained for older self-hosted servers
 No on-chain / live calls (transport mocked).
 """
 from __future__ import annotations
@@ -50,9 +53,10 @@ def test_resolve_both_differ_raises():
 class _Cap:
     def __init__(self, body=None):
         self.calls = []
+        # Canonical-keys-only body — matches the live server's 2xx shape.
         self.body = body or {
-            "bundle_id": "b" * 16, "txid": "dead", "mode": "standard",
-            "matter_slug": "srv", "receipt_url": "https://r",
+            "proof_id": "b" * 16, "txid": "dead", "mode": "standard",
+            "folder_slug": "srv", "proof_url": "https://r",
             "bundle_url": None, "duplicate": False,
         }
 
@@ -61,21 +65,21 @@ class _Cap:
         return 200, json.dumps(self.body).encode("utf-8")
 
 
-def test_anchor_standard_legacy_wire_body():
+def test_anchor_standard_legacy_kwarg_sends_canonical_wire_key():
     t = _Cap()
     api = SatsignalApi(api_base="https://app", api_key="sk", transport=t)
     res = api.anchor_standard(matter_slug="legacy", sha256_hex="a" * 64)
-    assert t.calls[0]["matter_slug"] == "legacy"
-    assert "folder_slug" not in t.calls[0]
+    assert t.calls[0]["folder_slug"] == "legacy"
+    assert "matter_slug" not in t.calls[0]
     assert res.matter_slug == res.folder_slug  # read alias
 
 
-def test_anchor_standard_new_kwarg_folds_into_matter_slug():
+def test_anchor_standard_canonical_kwarg_wire_body():
     t = _Cap()
     api = SatsignalApi(api_base="https://app", api_key="sk", transport=t)
     api.anchor_standard(folder_slug="newf", sha256_hex="a" * 64)
-    assert t.calls[0]["matter_slug"] == "newf"
-    assert "folder_slug" not in t.calls[0]
+    assert t.calls[0]["folder_slug"] == "newf"
+    assert "matter_slug" not in t.calls[0]
 
 
 def test_anchor_standard_conflict_raises():
@@ -87,35 +91,53 @@ def test_anchor_standard_conflict_raises():
     assert t.calls == []
 
 
-def test_anchor_manifest_legacy_and_new():
+def test_anchor_manifest_legacy_and_canonical_kwargs():
     t = _Cap(body={
-        "bundle_id": "b", "txid": "x", "mode": "manifest",
-        "matter_slug": "srv", "receipt_url": "https://r",
+        "proof_id": "b", "txid": "x", "mode": "manifest",
+        "folder_slug": "srv", "proof_url": "https://r",
         "bundle_url": None, "duplicate": False,
     })
     api = SatsignalApi(api_base="https://app", api_key="sk", transport=t)
     api.anchor_manifest(matter_slug="legacy",
                         items=[{"label": "a", "sha256_hex": "a" * 64}])
-    assert t.calls[0]["matter_slug"] == "legacy"
+    assert t.calls[0]["folder_slug"] == "legacy"
+    assert "matter_slug" not in t.calls[0]
     api.anchor_manifest(folder_slug="newf",
                         items=[{"label": "a", "sha256_hex": "a" * 64}])
-    assert t.calls[1]["matter_slug"] == "newf"
-    assert "folder_slug" not in t.calls[1]
+    assert t.calls[1]["folder_slug"] == "newf"
+    assert "matter_slug" not in t.calls[1]
 
 
-def test_anchor_reads_new_response_keys():
+def test_anchor_reads_canonical_only_response():
+    # The live server's 2xx shape — canonical keys, NO legacy keys.
     t = _Cap(body={
         "proof_id": "p1", "txid": "x", "mode": "standard",
         "folder_slug": "ff", "proof_url": "https://new",
-        "bundle_id": "OLD", "matter_slug": "OLDM",
-        "receipt_url": "https://old", "bundle_url": None,
-        "duplicate": False,
+        "bundle_url": None, "duplicate": False,
     })
     api = SatsignalApi(api_base="https://app", api_key="sk", transport=t)
     res = api.anchor_standard(folder_slug="ff", sha256_hex="a" * 64)
+    assert res.proof_id == "p1"
+    assert res.folder_slug == "ff"
+    assert res.proof_url == "https://new"
+    # Legacy read accessors mirror the canonical values.
     assert res.bundle_id == "p1"
     assert res.matter_slug == "ff"
     assert res.receipt_url == "https://new"
+
+
+def test_anchor_reads_legacy_response_keys_fallback():
+    # Older self-hosted servers still answer with legacy keys.
+    t = _Cap(body={
+        "bundle_id": "OLD", "txid": "x", "mode": "standard",
+        "matter_slug": "OLDM", "receipt_url": "https://old",
+        "bundle_url": None, "duplicate": False,
+    })
+    api = SatsignalApi(api_base="https://app", api_key="sk", transport=t)
+    res = api.anchor_standard(folder_slug="ff", sha256_hex="a" * 64)
+    assert res.proof_id == "OLD"
+    assert res.folder_slug == "OLDM"
+    assert res.proof_url == "https://old"
 
 
 # ───────────────────── processor ctor either-of ─────────────────────
@@ -126,7 +148,8 @@ def test_ctor_legacy_matter_slug_unchanged():
     try:
         assert p.matter_slug == "legacy"
         assert p.folder_slug == "legacy"
-        assert p._matter_slug == "legacy"  # legacy private attr
+        assert p._matter_slug == "legacy"  # deprecated private mirror
+        assert p._folder_slug == "legacy"  # canonical private attr
     finally:
         p.shutdown()
 

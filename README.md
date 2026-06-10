@@ -41,7 +41,7 @@ from satsignal_otel import SatsignalSpanProcessor, auto_anchor_on_eval_fail
 provider = TracerProvider()
 provider.add_span_processor(SatsignalSpanProcessor(
     api_key=os.environ["SATSIGNAL_API_KEY"],
-    matter_slug="otel-evals",
+    folder_slug="otel-evals",
 ))
 trace.set_tracer_provider(provider)
 
@@ -76,21 +76,28 @@ with tracer.start_as_current_span("release.gate") as span:
 
 ## Configuration
 
-> **Vocabulary:** `folder_slug` is the preferred public name;
-> `matter_slug` is a frozen legacy alias and keeps working forever.
+> **Vocabulary:** `folder_slug` is the canonical name; `matter_slug`
+> is a **deprecated** legacy alias that is still accepted silently.
 > The constructor accepts either; **at least one** is required (legacy
 > callers that pass `matter_slug=` are unaffected). If both are set to
-> *different* values the constructor raises. The HTTP request to the
-> Satsignal API still sends the frozen `matter_slug` key, so older /
-> self-hosted servers keep working unchanged. `.folder_slug` /
-> `.matter_slug` read accessors and `AnchorResult.folder_slug` /
-> `.proof_url` / `.proof_id` aliases are available.
+> *different* values the constructor raises `ValueError`.
+>
+> **Compatibility note (v0.3.0, vocabulary sunset):** requests now
+> send the canonical `folder_slug` wire key, and the live Satsignal
+> API emits canonical response keys only (`proof_id`, `proof_url`,
+> `folder_slug`). Reading still falls back to the legacy response keys
+> (`bundle_id`, `receipt_url`, `matter_slug`) for older self-hosted
+> servers, but a self-hosted server too old to *accept* the
+> `folder_slug` request key needs v0.2.x of this package.
+> `.folder_slug` / `.matter_slug` read accessors and
+> `AnchorResult.proof_id` / `.proof_url` / `.folder_slug` accessors
+> are available; new code should use the canonical names.
 
 ```python
 SatsignalSpanProcessor(
     api_key,                    # required: SATSIGNAL_API_KEY
-    folder_slug,                # preferred: workspace folder for proofs
-    # matter_slug,              # frozen legacy alias of folder_slug
+    folder_slug,                # canonical: workspace folder for proofs
+    # matter_slug,              # deprecated legacy alias of folder_slug
     base_url="https://app.satsignal.cloud",
     flush_interval=60.0,        # seconds between manifest flushes
     max_batch_size=500,         # force-flush when queue hits this size
@@ -157,10 +164,10 @@ The processor accepts a `transport=` callable matching urllib's shape:
 
 ```python
 def fake(method, url, headers, body, timeout):
-    return 200, b'{"bundle_id": "abc", "txid": "deadbeef", ...}'
+    return 200, b'{"proof_id": "abc", "txid": "deadbeef", ...}'
 
 processor = SatsignalSpanProcessor(
-    api_key="sk_test", matter_slug="m", transport=fake,
+    api_key="sk_test", folder_slug="f", transport=fake,
 )
 ```
 

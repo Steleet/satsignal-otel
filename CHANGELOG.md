@@ -1,8 +1,35 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
-- Release infrastructure: PyPI publishes via Trusted Publishers (OIDC) — workflow file is `.github/workflows/publish.yml`, no API tokens. Replaces a prior workflow that set `password: secrets.PYPI_API_TOKEN` alongside `id-token: write`, which silently disabled OIDC (that path never published). Mirrors the `satsignal-mcp` 0.4.1 pilot; see `RELEASE.md` in `Steleet/satsignal-mcp` and the public "How we publish" section at <https://satsignal.cloud/docs.html#how-we-publish>.
+Vocabulary sunset (decision 0046) — canonical `folder`/`proof` names
+become primary; `matter_slug` stays accepted as a deprecated silent
+alias. Python API is fully backward-compatible.
+
+- **Wire change:** request bodies now send the canonical `folder_slug`
+  key (was the legacy `matter_slug`). The live Satsignal API accepts
+  legacy request keys only as silent aliases; tooling sends canonical.
+  Self-hosted servers too old to accept `folder_slug` requests need
+  v0.2.x of this package.
+- Response reading: the live API emits canonical keys only
+  (`proof_id` / `proof_url` / `folder_slug`); legacy-key fallbacks
+  (`bundle_id` / `receipt_url` / `matter_slug`) are retained for older
+  self-hosted servers.
+- `folder_slug=` is now the primary documented constructor / API
+  kwarg; `matter_slug=` remains a deprecated silent alias (ValueError
+  if both are set to different values — unchanged rule).
+- Example: `SATSIGNAL_FOLDER` is the canonical env var;
+  `SATSIGNAL_MATTER` remains a deprecated fallback (error on
+  conflicting values). Dry-run mock now answers with canonical
+  response keys.
+- Dogfood workflow uses the action's `folder:` input and
+  `proof_id` / `proof_url` outputs.
+- README / docstrings use canonical vocabulary throughout, with one
+  compatibility note.
+- `AnchorResult` keeps its legacy field names for constructor
+  compatibility; read via the canonical `.proof_id` / `.proof_url` /
+  `.folder_slug` accessors.
+- Release infrastructure (previously unreleased): PyPI publishes via Trusted Publishers (OIDC) — workflow file is `.github/workflows/publish.yml`, no API tokens. Replaces a prior workflow that set `password: secrets.PYPI_API_TOKEN` alongside `id-token: write`, which silently disabled OIDC (that path never published). Mirrors the `satsignal-mcp` 0.4.1 pilot; see `RELEASE.md` in `Steleet/satsignal-mcp` and the public "How we publish" section at <https://satsignal.cloud/docs.html#how-we-publish>.
 
 ## 0.2.0
 

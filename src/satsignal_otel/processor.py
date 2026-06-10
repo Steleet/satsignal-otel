@@ -9,7 +9,7 @@ Drop into your ``TracerProvider``::
     provider.add_span_processor(
         SatsignalSpanProcessor(
             api_key=os.environ["SATSIGNAL_API_KEY"],
-            folder_slug="otel-evals",   # legacy alias: matter_slug=
+            folder_slug="otel-evals",   # deprecated alias: matter_slug=
         ),
     )
 
@@ -71,12 +71,12 @@ class SatsignalSpanProcessor(SpanProcessor):
         Bearer key from your Satsignal workspace. Required.
     folder_slug
         Workspace folder the proofs file under (e.g. ``"otel-evals"``).
-        Either ``folder_slug`` or the legacy ``matter_slug`` is
+        Either ``folder_slug`` or the deprecated ``matter_slug`` is
         required (both are accepted; if both are set to *different*
         values the constructor raises).
     matter_slug
-        Frozen legacy alias of ``folder_slug`` — still supported
-        forever.
+        Deprecated legacy alias of ``folder_slug`` — still accepted as
+        a silent alias; new code should pass ``folder_slug``.
     base_url
         Override the Satsignal API host. Defaults to the production
         host. Note: ``app.satsignal.cloud`` is the customer-API host;
@@ -109,8 +109,8 @@ class SatsignalSpanProcessor(SpanProcessor):
         self,
         *,
         api_key: str,
-        matter_slug: Optional[str] = None,
         folder_slug: Optional[str] = None,
+        matter_slug: Optional[str] = None,
         base_url: str = _anchor.DEFAULT_API_BASE,
         flush_interval: float = 60.0,
         max_batch_size: int = 500,
@@ -120,8 +120,8 @@ class SatsignalSpanProcessor(SpanProcessor):
     ):
         if not api_key:
             raise ValueError("api_key is required")
-        # ``folder_slug`` is the new public kwarg, ``matter_slug`` the
-        # frozen legacy one. Existing callers passing only
+        # ``folder_slug`` is the canonical kwarg, ``matter_slug`` the
+        # deprecated legacy alias. Existing callers passing only
         # ``matter_slug=`` are unaffected. Conflict (both set,
         # different) -> raise loudly; require at least one (legacy
         # callers always passed matter_slug, so none breaks).
@@ -132,7 +132,7 @@ class SatsignalSpanProcessor(SpanProcessor):
         if not _slug:
             raise ValueError(
                 "folder_slug is required "
-                "(or the legacy alias matter_slug)"
+                "(or the deprecated legacy alias matter_slug)"
             )
         if flush_interval <= 0:
             raise ValueError("flush_interval must be > 0")
@@ -142,9 +142,11 @@ class SatsignalSpanProcessor(SpanProcessor):
         self._api = SatsignalApi(
             api_base=base_url, api_key=api_key, transport=transport,
         )
-        # Stored under the legacy attr name so existing subclasses /
-        # introspection that read ``_matter_slug`` keep working; this
-        # is the resolved value regardless of which kwarg supplied it.
+        # Canonical store; ``_matter_slug`` is kept as a deprecated
+        # private mirror so existing subclasses / introspection that
+        # read it keep working. Both hold the resolved value regardless
+        # of which kwarg supplied it (set once, never diverge).
+        self._folder_slug = _slug
         self._matter_slug = _slug
         self._flush_interval = float(flush_interval)
         self._max_batch_size = int(max_batch_size)
@@ -172,13 +174,13 @@ class SatsignalSpanProcessor(SpanProcessor):
 
     @property
     def folder_slug(self) -> str:
-        """New public alias for the resolved folder/matter slug."""
-        return self._matter_slug
+        """The resolved workspace folder slug (canonical name)."""
+        return self._folder_slug
 
     @property
     def matter_slug(self) -> str:
-        """Legacy alias of :pyattr:`folder_slug` (still supported)."""
-        return self._matter_slug
+        """Deprecated legacy alias of :pyattr:`folder_slug`."""
+        return self._folder_slug
 
     # ---- SpanProcessor contract --------------------------------------
 
@@ -296,7 +298,7 @@ class SatsignalSpanProcessor(SpanProcessor):
     def _post_single(self, x: _QueuedSpan) -> None:
         def fn() -> AnchorResult:
             return self._api.anchor_standard(
-                matter_slug=self._matter_slug,
+                folder_slug=self._folder_slug,
                 sha256_hex=x.sha256_hex,
                 label=x.label or None,
                 session_id=x.session_id,
@@ -320,7 +322,7 @@ class SatsignalSpanProcessor(SpanProcessor):
 
         def fn() -> AnchorResult:
             return self._api.anchor_manifest(
-                matter_slug=self._matter_slug,
+                folder_slug=self._folder_slug,
                 items=items,
                 session_id=session_id,
             )

@@ -38,10 +38,10 @@ jobs:
         uses: Steleet/satsignal-action@v0
         with:
           path: _dogfood.json
-          matter: dogfood-pushes
+          folder: dogfood-pushes
           label: ${{ github.repository }}@${{ github.sha }}
           api-key: ${{ secrets.SATSIGNAL_API_KEY }}
 
       - name: Surface receipt
         run: |
-          echo "::notice title=Satsignal receipt::txid=${{ steps.anchor.outputs.txid }} bundle=${{ steps.anchor.outputs.bundle_id }} url=${{ steps.anchor.outputs.receipt_url }}"
+          echo "::notice title=Satsignal receipt::txid=${{ steps.anchor.outputs.txid }} proof=${{ steps.anchor.outputs.proof_id }} url=${{ steps.anchor.outputs.proof_url }}"

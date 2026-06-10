@@ -26,7 +26,10 @@ Usage:
 Environment:
     SATSIGNAL_API_KEY    bearer token; if unset, runs in dry-run mode
                          and uses a mock transport (no broadcast).
-    SATSIGNAL_MATTER     workspace matter slug (default: otel-spans)
+    SATSIGNAL_FOLDER     workspace folder slug (default: otel-spans)
+    SATSIGNAL_MATTER     deprecated legacy alias of SATSIGNAL_FOLDER;
+                         still honored — error if both are set to
+                         different values.
     SATSIGNAL_API_BASE   API host (default: https://app.satsignal.cloud)
 
 Cost: one manifest BSV transaction covers all failed leaves
@@ -46,6 +49,19 @@ from satsignal_otel import (
     SatsignalSpanProcessor,
     auto_anchor_on_eval_fail,
 )
+from satsignal_otel._anchor import resolve_folder_alias
+
+
+def _folder_from_env(default: str = "otel-spans") -> str:
+    """SATSIGNAL_FOLDER is canonical; SATSIGNAL_MATTER is the
+    deprecated legacy fallback. Both set + different -> ValueError
+    (same rule as the constructor kwargs)."""
+    slug = resolve_folder_alias(
+        os.environ.get("SATSIGNAL_FOLDER", "").strip(),
+        os.environ.get("SATSIGNAL_MATTER", "").strip(),
+        source="SATSIGNAL_FOLDER/SATSIGNAL_MATTER",
+    )
+    return slug or default
 
 
 # ---- the eval (same SUBMISSIONS as example_eval_run.py) -------------
@@ -87,12 +103,15 @@ class _MockTransport:
 
     def __call__(self, method, url, headers, body, timeout):
         self.calls.append((method, url, body))
+        # Canonical response keys only — matches the live API
+        # (vocabulary sunset; legacy bundle_id/receipt_url/matter_slug
+        # keys are gone from 2xx responses).
         canned = {
-            "bundle_id": "DRYRUN_BUNDLE_ID",
+            "proof_id": "DRYRUN_PROOF_ID",
             "txid": "DRYRUN_TXID",
             "mode": "manifest",
-            "matter_slug": os.environ.get("SATSIGNAL_MATTER", "otel-spans"),
-            "receipt_url":
+            "folder_slug": _folder_from_env(),
+            "proof_url":
                 "https://app.satsignal.cloud/w/<workspace>/m/otel-spans/r/DRYRUN",
             "bundle_url": None,
             "duplicate": False,
@@ -106,7 +125,7 @@ class _MockTransport:
 
 def main() -> int:
     api_key = os.environ.get("SATSIGNAL_API_KEY", "").strip()
-    matter_slug = os.environ.get("SATSIGNAL_MATTER", "otel-spans").strip()
+    folder_slug = _folder_from_env()
     base_url = (
         os.environ.get("SATSIGNAL_API_BASE", "https://app.satsignal.cloud")
         .rstrip("/")
@@ -124,7 +143,7 @@ def main() -> int:
     )
     processor = SatsignalSpanProcessor(
         api_key=api_key or "sk_dryrun",
-        matter_slug=matter_slug,
+        folder_slug=folder_slug,
         base_url=base_url,
         flush_interval=2.0,    # short window so the example flushes fast
         daily_anchor_cap=10,   # conservative cap for dogfood
@@ -135,7 +154,7 @@ def main() -> int:
     tracer = trace.get_tracer("satsignal-otel-dogfood")
 
     print(f"# satsignal-otel dogfood eval")
-    print(f"# matter_slug    = {matter_slug}")
+    print(f"# folder_slug    = {folder_slug}")
     print(f"# base_url       = {base_url}")
     print(f"# dry_run        = {is_dry_run}")
     print()
@@ -186,10 +205,10 @@ def main() -> int:
     else:
         print()
         print(
-            "# Broadcast complete. Check the matter activity feed at:",
+            "# Broadcast complete. Check the folder activity feed at:",
         )
         print(
-            f"#   https://app.satsignal.cloud/w/<workspace>/m/{matter_slug}/activity",
+            f"#   https://app.satsignal.cloud/w/<workspace>/m/{folder_slug}/activity",
         )
         print(
             "# The receipt binds all failed leaves under one Merkle root;",
